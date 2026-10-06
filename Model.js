@@ -89,8 +89,117 @@ function modeLabel(device, onBattery, states) {
   return "Charging"
 }
 
+// ---------- bar pill: level and power flow ----------
+
+// Power through the batteries, from `grep -H .` over each one's sysfs
+// status, power_now (µW), current_now (µA) and voltage_now (µV). The
+// direction comes from status: some drivers sign current_now, others don't.
+// Returns null when no battery answered.
+function parseSysfsPower(raw) {
+  var batteries = {}
+  var lines = String(raw || "").split("\n")
+  for (var i = 0; i < lines.length; i++) {
+    var match = /^(.*)\/([a-z_]+):(.*)$/.exec(lines[i])
+    if (!match) continue
+    var entry = batteries[match[1]] || (batteries[match[1]] = {})
+    entry[match[2]] = match[3].trim()
+  }
+
+  var watts = 0
+  var found = false
+  var charging = false
+  var discharging = false
+  for (var path in batteries) {
+    var b = batteries[path]
+    if (b.status === undefined) continue
+    found = true
+    if (b.status === "Charging") charging = true
+    else if (b.status === "Discharging") discharging = true
+
+    var w = 0
+    if (b.power_now !== undefined) w = Number(b.power_now) / 1e6
+    else if (b.current_now !== undefined && b.voltage_now !== undefined)
+      w = Number(b.current_now) * Number(b.voltage_now) / 1e12
+    if (isFinite(w)) watts += Math.abs(w)
+  }
+  if (!found) return null
+  return {
+    watts: watts,
+    direction: discharging ? "discharging" : (charging ? "charging" : "idle")
+  }
+}
+
+// The last maxSamples readings, newest last.
+function pushSample(samples, watts, maxSamples) {
+  var next = (Array.isArray(samples) ? samples : []).concat([watts])
+  return next.length > maxSamples ? next.slice(next.length - maxSamples) : next
+}
+
+function mean(samples) {
+  if (!Array.isArray(samples) || samples.length === 0) return null
+  var sum = 0
+  for (var i = 0; i < samples.length; i++) sum += samples[i]
+  return sum / samples.length
+}
+
+// Green, yellow, red by charge left; Omarchy's own warning comes at 10%.
+function levelStatus(percent) {
+  if (percent < 15) return "bad"
+  if (percent < 30) return "warning"
+  return "good"
+}
+
+// Whether power is flowing in or out at a rate worth showing. A battery held
+// at its charge limit reports Charging at a fraction of a watt.
+function flowing(direction, watts) {
+  if (watts === null || watts === undefined) return false
+  if (direction === "discharging") return true
+  return direction === "charging" && watts >= 0.5
+}
+
+// "84% −13 W" on battery, "62% +25 W" charging, "100% 󰚥" on AC with nothing
+// flowing, "84%" with the rate hidden; the bare number on a vertical bar.
+function faceLabel(percent, watts, direction, onBattery, showRate, vertical) {
+  var level = Math.round(percent)
+  if (vertical) return String(level)
+  var label = level + "%"
+  if (!showRate) return label
+  if (watts === null || watts === undefined) return label + " …"
+  if (flowing(direction, watts)) {
+    var sign = direction === "charging" ? "+" : "−"
+    return label + " " + sign + Math.max(1, Math.round(watts)) + " W"
+  }
+  return onBattery ? label : label + " 󰚥"
+}
+
+// Seconds to empty, or to full, at the given rate. UPower's own estimate uses
+// its single latest reading, so it can disagree with the mean on the pill.
+function secondsLeft(direction, energyWh, capacityWh, watts) {
+  if (!(watts > 0)) return 0
+  var wh = direction === "charging" ? capacityWh - energyWh : energyWh
+  return wh > 0 ? wh / watts * 3600 : 0
+}
+
+function formatDuration(seconds) {
+  var s = Number(seconds)
+  if (!isFinite(s) || s <= 0) return ""
+  var minutes = Math.round(s / 60)
+  var h = Math.floor(minutes / 60)
+  var m = minutes % 60
+  if (h === 0) return m + " min"
+  return h + " h " + (m < 10 ? "0" : "") + m + " min"
+}
+
 if (typeof module !== "undefined") {
   module.exports = {
+    parseSysfsPower: parseSysfsPower,
+    pushSample: pushSample,
+    mean: mean,
+    levelStatus: levelStatus,
+    flowing: flowing,
+    faceLabel: faceLabel,
+    secondsLeft: secondsLeft,
+    formatDuration: formatDuration,
     clampIndex: clampIndex,
     selectProfileIndex: selectProfileIndex,
     parseKeyValue: parseKeyValue,

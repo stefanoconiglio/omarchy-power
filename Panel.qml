@@ -6,6 +6,11 @@ import qs.Commons
 import qs.Ui
 import "Model.js" as Model
 
+// Omarchy's Power widget with another bar face: the charge left and the power
+// flowing out of the battery or into it ("84% −13 W", "62% +25 W"), on a dark
+// pill outlined in the bar's text colour, like the PingScope face. The level
+// sets the colour: green, yellow below 30%, red below 15%. Right-click hides
+// or shows the rate. The panel is Omarchy's own.
 Panel {
   id: root
   moduleName: "omarchy.power"
@@ -19,11 +24,72 @@ Panel {
   property string activeProfile: ""
   property int profileIndex: 0
   property bool cursorActive: false
-  readonly property bool showPercentage: setting("showPercentage", false) === true
-  // With the percentage shown the button paints a text block wider than an
-  // icon, so the open-panel mark takes the painted width instead of the
-  // icon-sized fraction of the slot the fallback assumes.
-  readonly property real openPanelIndicatorWidth: showPercentage && !button.vertical ? button.glyphPaintedWidth : 0
+  readonly property bool vertical: bar ? bar.vertical : false
+  readonly property int barSize: bar ? bar.barSize : Style.bar.sizeHorizontal
+  readonly property bool showRate: setting("showRate", true) !== false
+  // The open-panel mark spans the pill.
+  readonly property real openPanelIndicatorWidth: vertical ? 0 : pill.width
+  readonly property real openPanelIndicatorHeight: vertical ? pill.height : 0
+
+  // ---------- power flow, for the pill ----------
+  //
+  // UPower's rate lags and, on this kind of battery, jumps by several watts
+  // from one reading to the next, so the pill shows the mean of the sysfs
+  // readings over the last rateWindowSec seconds, restarted whenever the
+  // battery changes between charging and discharging.
+  readonly property int sampleIntervalMs: 2000
+  readonly property int rateWindowSec: 30
+  property var rateSamples: []
+  property string flowDirection: ""
+  property real lastWatts: 0
+  readonly property var meanWatts: Model.mean(rateSamples)
+
+  function takeSample(raw) {
+    var reading = Model.parseSysfsPower(raw)
+    if (!reading) return
+    if (reading.direction !== flowDirection) rateSamples = []
+    flowDirection = reading.direction
+    lastWatts = reading.watts
+    rateSamples = Model.pushSample(rateSamples, reading.watts,
+                                   Math.max(1, Math.round(rateWindowSec * 1000 / sampleIntervalMs)))
+  }
+
+  // Readable on the pill's dark fill whatever the theme (PingScope's colours).
+  readonly property color pillFill: "#18181b"
+  readonly property color pillText: "#e4e4e7"
+  readonly property color goodLevel: "#22c55e"
+  readonly property color warningLevel: "#eab308"
+  readonly property color badLevel: "#ef4444"
+
+  readonly property int levelPercent: Math.round(batteryFraction * 100)
+
+  function levelColor() {
+    var status = Model.levelStatus(levelPercent)
+    if (status === "bad") return badLevel
+    if (status === "warning") return warningLevel
+    return goodLevel
+  }
+
+  function barLabel() {
+    return Model.faceLabel(levelPercent, meanWatts, flowDirection, UPower.onBattery, showRate, vertical)
+  }
+
+  function tooltipText() {
+    var device = UPower.displayDevice
+    var lines = []
+    var head = "Battery " + levelPercent + "%"
+    if (Model.flowing(flowDirection, meanWatts)) {
+      head += " · " + flowDirection + " " + meanWatts.toFixed(1) + " W"
+      lines.push(head)
+      lines.push("Mean of the last " + rateWindowSec + " s; now " + lastWatts.toFixed(1) + " W")
+      var left = Model.formatDuration(Model.secondsLeft(flowDirection, device.energy, device.energyCapacity, meanWatts))
+      if (left) lines.push("About " + left + (flowDirection === "charging" ? " to full" : " left") + " at this rate")
+    } else {
+      lines.push(head + " · " + modeLabel().toLowerCase())
+    }
+    lines.push("Left: details and power profile · Right: " + (showRate ? "hide" : "show") + " the rate")
+    return lines.join("\n")
+  }
   readonly property bool batteryPresent: {
     var device = UPower.displayDevice
     return !!(device && device.isPresent)
@@ -169,8 +235,10 @@ Panel {
     actionProc.running = true
   }
 
-  function togglePercentage() {
-    root.settings = Object.assign({}, root.settings, { showPercentage: !root.showPercentage })
+  // The pill always shows the percentage; Omarchy's "Battery Percentage"
+  // toggle (menu, IPC togglePercentage) hides or shows the rate instead.
+  function toggleRate() {
+    root.settings = Object.assign({}, root.settings, { showRate: !root.showRate })
     if (root.bar && root.bar.shell) root.bar.shell.updateEntryInline(root.moduleName, root.settings)
   }
 
@@ -182,7 +250,8 @@ Panel {
     function show() { root.open() }
     function hide() { root.close() }
     function toggle() { root.toggle() }
-    function togglePercentage() { root.togglePercentage() }
+    function togglePercentage() { root.toggleRate() }
+    function toggleRate() { root.toggleRate() }
   }
 
   onOpenedChanged: {
@@ -202,8 +271,8 @@ Panel {
   onBatteryPresentChanged: if (!batteryPresent) close()
 
   visible: batteryPresent
-  implicitWidth: batteryPresent ? button.implicitWidth : 0
-  implicitHeight: batteryPresent ? button.implicitHeight : 0
+  implicitWidth: batteryPresent ? (vertical ? barSize : pill.width + Style.space(10)) : 0
+  implicitHeight: batteryPresent ? (vertical ? pill.height + Style.space(10) : barSize) : 0
 
   Process {
     id: batteryProc
@@ -226,6 +295,22 @@ Panel {
   Process {
     id: actionProc
     onExited: root.refresh()
+  }
+
+  // grep -s: power_now exists on some batteries, current_now and voltage_now
+  // on others.
+  Process {
+    id: powerProc
+    command: ["sh", "-c", "cd /sys/class/power_supply && grep -sH . BAT*/status BAT*/power_now BAT*/current_now BAT*/voltage_now"]
+    stdout: StdioCollector { waitForEnd: true; onStreamFinished: root.takeSample(text) }
+  }
+
+  Timer {
+    interval: root.sampleIntervalMs
+    running: root.batteryPresent
+    repeat: true
+    triggeredOnStart: true
+    onTriggered: if (!powerProc.running) powerProc.running = true
   }
 
   Timer { interval: 5000; running: root.opened; repeat: true; onTriggered: root.refresh() }
@@ -273,25 +358,100 @@ Panel {
     }
   }
 
-  BarIconButton {
-    id: button
+  // ---------- bar face ----------
+  //
+  // Hand-made like PingScope's face (BarIconButton draws a glyph only): it
+  // registers as a click target and shows the bar's shared tooltip itself.
+  Item {
+    id: face
     anchors.fill: parent
-    bar: root.bar
-    text: root.showPercentage && !vertical
-      ? Math.round(root.batteryFraction * 100) + "% " + root.batteryIcon()
-      : root.batteryIcon()
-    slotSize: Style.bar.iconSlot * (root.showPercentage && !vertical ? 2 : 1)
-    tooltipText: ""
-    onPressed: function(b) {
-      if (!root.batteryPresent) return
-      if (b === Qt.RightButton) root.togglePercentage()
-      else root.toggle()
+    // The bar shows its tooltip only while the target says it is hovered.
+    readonly property bool tooltipHovered: faceMouse.containsMouse
+
+    Component.onCompleted: if (root.bar && root.bar.registerClickTarget) root.bar.registerClickTarget(face)
+    Component.onDestruction: if (root.bar && root.bar.unregisterClickTarget) root.bar.unregisterClickTarget(face)
+
+    // The widest label sets the pill's width, so the neighbouring widgets
+    // never move as the numbers change.
+    TextMetrics {
+      id: widest
+      font: pillLabel.font
+      text: root.vertical ? "100" : (root.showRate ? "100% −88 W" : "100%")
+    }
+
+    // The ink of the current label: centring the line box would leave the
+    // glyphs high (it keeps room for descenders) and off by bearings.
+    TextMetrics {
+      id: ink
+      font: pillLabel.font
+      text: pillLabel.text
+    }
+
+    // Digits only, for the vertical position: every label shares a baseline.
+    TextMetrics {
+      id: digits
+      font: pillLabel.font
+      text: "100"
+    }
+
+    FontMetrics {
+      id: lineMetrics
+      font: pillLabel.font
+    }
+
+    Rectangle {
+      id: pill
+      anchors.centerIn: parent
+      // Even, so the space left and right of the text splits without a half pixel.
+      width: {
+        var w = Math.ceil(widest.width) + Style.space(14)
+        return w % 2 === 0 ? w : w + 1
+      }
+      // Same parity as the bar, so centring the pill leaves no half pixel.
+      height: {
+        var h = Math.min(root.barSize - Style.space(2), Math.ceil(lineMetrics.height) + Style.space(2))
+        return (root.barSize - h) % 2 === 0 ? h : h - 1
+      }
+      radius: height / 2
+      color: root.pillFill
+      border.width: Math.max(1, Math.round(Style.space(1.5)))
+      border.color: root.barForeground
+
+      Text {
+        id: pillLabel
+        // tightBoundingRect is relative to the baseline, at ascent below the top.
+        x: (pill.width - ink.tightBoundingRect.width) / 2 - ink.tightBoundingRect.x
+        y: Math.round((pill.height - digits.tightBoundingRect.height) / 2
+                      - digits.tightBoundingRect.y - lineMetrics.ascent)
+        textFormat: Text.PlainText
+        text: root.barLabel()
+        color: root.levelColor()
+        font.family: root.bar ? root.bar.fontFamily : Style.font.family
+        font.pixelSize: Style.font.title
+        font.bold: true
+      }
+    }
+
+    MouseArea {
+      id: faceMouse
+      anchors.fill: parent
+      acceptedButtons: Qt.LeftButton | Qt.RightButton
+      hoverEnabled: true
+      cursorShape: Qt.PointingHandCursor
+      onEntered: if (root.bar) root.bar.showTooltip(face, root.tooltipText())
+      onExited: if (root.bar) root.bar.hideTooltip(face)
+      onClicked: function(mouse) {
+        if (root.bar) root.bar.hideTooltip(face)
+        if (!root.batteryPresent) return
+        if (mouse.button === Qt.RightButton) root.toggleRate()
+        else root.toggle()
+      }
     }
   }
 
   KeyboardPanel {
     id: panel
-    anchorItem: button
+    anchorItem: face
     owner: root
     bar: root.bar
     open: root.opened && root.batteryPresent
