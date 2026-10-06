@@ -3,8 +3,8 @@
   "id": "coniglio.power",
   "name": "My Power",
   "version": "1.0.0",
-  "author": "Omarchy",
-  "description": "Battery, power profile, and system stats",
+  "author": "Stefano Coniglio, from Omarchy's Power widget",
+  "description": "Battery left and power flowing in or out, on a pill in the bar; Omarchy's Power panel",
   "kinds": [
     "bar-widget"
   ],
@@ -13,11 +13,12 @@
   },
   "barWidget": {
     "displayName": "My Power",
-    "description": "Battery, power profile, and system stats",
+    "description": "Battery left and power flow on a pill; click for the Power panel",
     "category": "System",
     "allowMultiple": false
   },
   "omarchy": {
     "clonedFrom": "omarchy.power"
-  }
+  },
+  "license": "MIT"
 }
