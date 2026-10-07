@@ -7,10 +7,10 @@ import qs.Ui
 import "Model.js" as Model
 
 // Omarchy's Power widget with another bar face: the charge left and the power
-// flowing out of the battery or into it ("84% −13 W", "62% +25 W"), on a dark
-// pill outlined in the bar's text colour, like the PingScope face. The level
-// sets the colour: green, yellow below 30%, red below 15%. Right-click hides
-// or shows the rate. The panel is Omarchy's own.
+// flowing out of the battery or into it ("84% −13 W", "62% +25 W"), inside a
+// soft outline in the bar's text colour, like the other outlined widgets. The
+// text is the bar's colour, orange below 30%, red below 15% (Attention.qml).
+// Right-click hides or shows the rate. The panel is Omarchy's own.
 Panel {
   id: root
   moduleName: "omarchy.power"
@@ -54,20 +54,16 @@ Panel {
                                    Math.max(1, Math.round(rateWindowSec * 1000 / sampleIntervalMs)))
   }
 
-  // Readable on the pill's dark fill whatever the theme (PingScope's colours).
-  readonly property color pillFill: "#18181b"
-  readonly property color pillText: "#e4e4e7"
-  readonly property color goodLevel: "#22c55e"
-  readonly property color warningLevel: "#eab308"
-  readonly property color badLevel: "#ef4444"
+  // Outline, normal text, orange and red, from the theme (Attention.qml).
+  Attention { id: attention; bar: root.bar }
 
   readonly property int levelPercent: Math.round(batteryFraction * 100)
 
   function levelColor() {
     var status = Model.levelStatus(levelPercent)
-    if (status === "bad") return badLevel
-    if (status === "warning") return warningLevel
-    return goodLevel
+    if (status === "bad") return attention.red
+    if (status === "warning") return attention.orange
+    return attention.normal
   }
 
   function barLabel() {
@@ -413,9 +409,9 @@ Panel {
         return (root.barSize - h) % 2 === 0 ? h : h - 1
       }
       radius: height / 2
-      color: root.pillFill
+      color: "transparent"
       border.width: Math.max(1, Math.round(Style.space(1.5)))
-      border.color: root.barForeground
+      border.color: attention.outline
 
       Text {
         id: pillLabel
