@@ -18,11 +18,12 @@ The text is in the bar's own colour, orange below 30% and red below 15%
 text colour at half strength, marks what belongs to the widget. Its width
 never changes, so the widgets next to it never move.
 
-The colours follow the theme (`Attention.qml`, `Attention.js`): the theme's
-own orange and red when it has real ones, a standard orange and red where
-it doesn't (some themes give those names to green, grey or blue), either one
-darkened or lightened just enough to read at 3:1 against the bar. Checked on
-Omarchy's 22 stock themes.
+The numbers are bold, in the bar's title size, like the other outlined
+widgets. The colours (`Attention.qml`, `Attention.js`): the theme's own orange
+when it has a real one (some themes give the name to green, grey or blue), a
+standard orange otherwise, and always a standard red; either one darkened or
+lightened just enough to read at 3:1 against the bar. Checked on Omarchy's 22
+stock themes.
 
 - **Hover**: the rate to a tenth of a watt, the latest reading, and the time
   left at that rate.
