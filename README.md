@@ -1,4 +1,4 @@
-# Power, in an outline
+# Power + Watts
 
 An Omarchy shell widget: Omarchy's own Power widget with another face in the
 bar. Instead of a battery glyph, it shows the charge left and the power

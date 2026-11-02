@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "id": "coniglio.power",
-  "name": "My Power",
+  "name": "Power + Watts",
   "version": "1.0.0",
   "author": "Stefano Coniglio, from Omarchy's Power widget",
   "description": "Battery left and power flowing in or out, on a pill in the bar; Omarchy's Power panel",
@@ -12,7 +12,7 @@
     "barWidget": "Panel.qml"
   },
   "barWidget": {
-    "displayName": "My Power",
+    "displayName": "Power + Watts",
     "description": "Battery left and power flow on a pill; click for the Power panel",
     "category": "System",
     "allowMultiple": false
